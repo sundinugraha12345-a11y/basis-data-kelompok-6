@@ -10,12 +10,11 @@ def get_db_connection():
     return mysql.connector.connect(
         host="beyszfa0jr2llg848xpr-mysql.services.clever-cloud.com",
         database="beyszfa0jr2llg848xpr", 
-        user="u4mvn9ck4uwhf5kt",              
+        user="u4mvn9ck4uwhf5kt",               
         password="AOrccIxnxjcSl5v7u3YG", 
         port=3306
     )
 
-# --- Fungsi ambil data barang (Sudah pakai JOIN ke tabel kategori) ---
 def fetch_data_barang():
     try:
         conn = get_db_connection()
@@ -35,7 +34,6 @@ def fetch_data_barang():
     except Exception:
         return pd.DataFrame(columns=["id_produk", "kategori", "nama_produk", "harga_jual", "stok_awal"])
 
-# --- Fungsi mengambil daftar kategori langsung dari database ---
 def fetch_daftar_kategori():
     try:
         conn = get_db_connection()
@@ -48,7 +46,6 @@ def fetch_daftar_kategori():
     except Exception:
         return []
 
-# --- Fungsi mengambil daftar kategori untuk ditampilkan di tabel ---
 def fetch_data_kategori_tabel():
     try:
         conn = get_db_connection()
@@ -59,7 +56,6 @@ def fetch_data_kategori_tabel():
     except Exception:
         return pd.DataFrame(columns=["ID Kategori", "Nama Kategori"])
 
-# --- Fungsi mengambil daftar supplier untuk ditampilkan di tabel ---
 def fetch_data_supplier():
     try:
         conn = get_db_connection()
@@ -107,7 +103,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Session State Awal
 if 'is_logged_in' not in st.session_state:
     st.session_state.is_logged_in = False
 if 'username' not in st.session_state:
@@ -163,7 +158,7 @@ if not st.session_state.is_logged_in:
 
 
 # ==========================================
-# 4. SIDEBAR NAVIGASI
+# 4. SIDEBAR NAVIGASI (HANYA MUNCUL JIKA SUDAH LOGIN)
 # ==========================================
 if st.session_state.is_logged_in:
     role = st.session_state.role
@@ -205,10 +200,8 @@ if st.session_state.is_logged_in:
         st.title("📦 Manajemen Inventory")
         tab1, tab2, tab3 = st.tabs(["Tambah Produk / Update Stok", "Tambah Kategori Baru", "Data Supplier"])
         
-        # TAB 1: INPUT PRODUK BARU
         with tab1:
             st.subheader("Input Produk Baru / Tambah Stok")
-            
             kategori_db = fetch_daftar_kategori()
             opsi_kategori = {f"{row['id_kategori']} - {row['nama_kategori']}": row['id_kategori'] for row in kategori_db}
             
@@ -265,16 +258,12 @@ if st.session_state.is_logged_in:
                         cursor.close()
                         conn.close()
                         st.rerun()
-                        
                     except mysql.connector.Error as err:
                         st.error(f"Gagal memproses data ke database. Error: {err}")
 
-        # ====== TAB BARU: INPUT KATEGORI BARU ======
         with tab2:
             st.subheader("➕ Tambah Kategori Produk Baru")
             kat_col1, kat_col2 = st.columns(2)
-            
-            # Hitung rekomendasi ID Kategori otomatis biar user ga bingung
             df_kat_cek = fetch_data_kategori_tabel()
             next_id_kat = len(df_kat_cek) + 1
             
@@ -306,7 +295,6 @@ if st.session_state.is_logged_in:
             else:
                 st.dataframe(df_kat_cek, use_container_width=True, hide_index=True)
 
-        # TAB 3: DATA SUPPLIER
         with tab3:
             st.subheader("Input Supplier Baru")
             s_col1, s_col2 = st.columns(2)
@@ -335,7 +323,6 @@ if st.session_state.is_logged_in:
             st.write("---")
             st.subheader("📋 Daftar Supplier Terdaftar")
             df_supplier = fetch_data_supplier()
-            
             if df_supplier.empty:
                 st.info("Belum ada data supplier yang tercatat di database.")
             else:
@@ -413,7 +400,6 @@ if st.session_state.is_logged_in:
                         try:
                             conn = get_db_connection()
                             cursor = conn.cursor()
-                            
                             waktu_sekarang = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                             
                             for item in st.session_state.keranjang:
@@ -422,6 +408,7 @@ if st.session_state.is_logged_in:
                                     (item['id_produk'], item['jumlah'], item['subtotal'], waktu_sekarang)
                                 )
                                 cursor.execute("UPDATE barang SET stok_awal = stok_awal - %s WHERE id_produk = %s", (item['jumlah'], item['id_produk']))
+                            
                             conn.commit()
                             cursor.close()
                             conn.close()
@@ -436,6 +423,29 @@ if st.session_state.is_logged_in:
     # --- HALAMAN: MANAGER / OWNER ---
     elif page == "Manager/Owner":
         st.title("📊 Laporan Penjualan")
+        
+        # =========================================================================
+        # FITUR AUTO-REFRESH LIVE CLOCK (MENGGUNAKAN ST.FRAGMENT)
+        # =========================================================================
+        @st.fragment(run_every=1.0)
+        def live_clock():
+            waktu_utc = datetime.datetime.utcnow()
+            waktu_wib = waktu_utc + datetime.timedelta(hours=7)
+            
+            jam_sekarang = waktu_wib.strftime("%H:%M:%S")
+            tanggal_sekarang = waktu_wib.strftime("%d %B %Y")
+            
+            st.markdown(f"""
+                <div style='background-color: #1e1e26; padding: 12px 20px; border-radius: 6px; margin-bottom: 25px; border-left: 5px solid #ff4b4b; box-shadow: 2px 2px 5px rgba(0,0,0,0.2);'>
+                    <span style='color: #888899; font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;'>⏰ Real-Time Tracker (WIB):</span>
+                    <span style='color: #ff4b4b; font-size: 18px; font-weight: bold; margin-left: 10px;'>{jam_sekarang}</span>
+                    <span style='color: #ffffff; font-size: 14px; margin-left: 15px;'>| {tanggal_sekarang}</span>
+                </div>
+            """, unsafe_allow_html=True)
+
+        live_clock()
+        # =========================================================================
+
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
