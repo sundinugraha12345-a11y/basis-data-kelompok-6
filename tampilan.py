@@ -400,12 +400,15 @@ if st.session_state.is_logged_in:
                         try:
                             conn = get_db_connection()
                             cursor = conn.cursor()
-                            waktu_sekarang = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            
+                            waktu_utc = datetime.datetime.utcnow()
+                            waktu_wib = waktu_utc + datetime.timedelta(hours=7)
+                            waktu_sekarang_wib = waktu_wib.strftime('%Y-%m-%d %H:%M:%S')
                             
                             for item in st.session_state.keranjang:
                                 cursor.execute(
                                     "INSERT INTO transaksi (id_produk, jumlah, total_bayar, tanggal_transaksi) VALUES (%s, %s, %s, %s)", 
-                                    (item['id_produk'], item['jumlah'], item['subtotal'], waktu_sekarang)
+                                    (item['id_produk'], item['jumlah'], item['subtotal'], waktu_sekarang_wib)
                                 )
                                 cursor.execute("UPDATE barang SET stok_awal = stok_awal - %s WHERE id_produk = %s", (item['jumlah'], item['id_produk']))
                             
@@ -493,3 +496,61 @@ if st.session_state.is_logged_in:
             st.info("Belum ada riwayat transaksi yang tercatat.")
         else:
             st.dataframe(df_laporan, use_container_width=True, hide_index=True)
+            
+            # =========================================================================
+            # FITUR BARU: FORM RETUR / PEMBATALAN TRANSAKSI (TRANSAKSI PEMBALIK)
+            # =========================================================================
+            st.write("---")
+            st.subheader("🔄 Retur / Pembatalan Salah Input Transaksi")
+            
+            # Memfilter ID transaksi yang bernilai positif saja yang bisa diretur (biar ga retur di dalam retur)
+            df_bisa_retur = df_laporan[df_laporan['Jumlah Terjual (Pcs)'] > 0]
+            
+            if not df_bisa_retur.empty:
+                list_id_transaksi = df_bisa_retur['ID Transaksi'].tolist()
+                
+                col_retur1, col_retur2 = st.columns([1, 2])
+                id_retur_terpilih = col_retur1.selectbox("Pilih ID Transaksi Yang Ingin Diretur", list_id_transaksi)
+                
+                # Menampilkan rincian barang yang dipilih sebelum dieksekusi pembatalan
+                row_detail = df_bisa_retur[df_bisa_retur['ID Transaksi'] == id_retur_terpilih].iloc[0]
+                col_retur2.info(f"📋 **Detail Barang**: {row_detail['Nama Produk']} | **Jumlah**: {row_detail['Jumlah Terjual (Pcs)']} Pcs | **Total**: Rp {row_detail['Total Bayar (Rp)']:,.0f}")
+                
+                if st.button("⚠️ Batalkan Transaksi & Retur Stok", type="secondary"):
+                    try:
+                        conn = get_db_connection()
+                        cursor = conn.cursor(dictionary=True)
+                        
+                        # 1. Ambil ID Produk dan detail kuantitas asli berdasarkan ID Transaksi yang dipilih
+                        cursor.execute("SELECT id_produk, jumlah, total_bayar FROM transaksi WHERE id_transaksi = %s", (int(id_retur_terpilih),))
+                        data_transaksi_asal = cursor.fetchone()
+                        
+                        if data_transaksi_asal:
+                            id_p_asal = data_transaksi_asal['id_produk']
+                            qty_asal = data_transaksi_asal['jumlah']
+                            money_asal = float(data_transaksi_asal['total_bayar'])
+                            
+                            # Logika Waktu WIB saat proses retur dilakukan
+                            waktu_utc = datetime.datetime.utcnow()
+                            waktu_wib = waktu_utc + datetime.timedelta(hours=7)
+                            waktu_retur_wib = waktu_wib.strftime('%Y-%m-%d %H:%M:%S')
+                            
+                            # 2. Masukkan Data Pembalik (Nilai Minus) ke tabel transaksi sebagai penyeimbang laporan keuangan
+                            query_insert_pembalik = "INSERT INTO transaksi (id_produk, jumlah, total_bayar, tanggal_transaksi) VALUES (%s, %s, %s, %s)"
+                            cursor.execute(query_insert_pembalik, (id_p_asal, -qty_asal, -money_asal, waktu_retur_wib))
+                            
+                            # 3. Kembalikan (Tambahkan kembali) stok barang yang batal dibeli ke dalam gudang inventory
+                            query_update_stok = "UPDATE barang SET stok_awal = stok_awal + %s WHERE id_produk = %s"
+                            cursor.execute(query_update_stok, (qty_asal, id_p_asal))
+                            
+                            conn.commit()
+                            st.success(f"Sukses! Transaksi ID #{id_retur_terpilih} berhasil diretur. Stok produk telah dikembalikan (+{qty_asal}).")
+                            
+                        cursor.close()
+                        conn.close()
+                        st.rerun()
+                        
+                    except mysql.connector.Error as err:
+                        st.error(f"Gagal melakukan proses retur: {err}")
+            else:
+                st.info("Tidak ada data transaksi penjualan aktif yang bisa diretur.")
